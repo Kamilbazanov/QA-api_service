@@ -1,6 +1,6 @@
 ## QA API Service
 
-Минималистичный сервис вопросов и ответов на Go. Использует `net/http`, GORM, PostgreSQL и миграции Goose. Каждый обработчик покрыт комментариями, чтобы junior-разработчику было проще разобраться в коде.
+Сервис вопросов и ответов на Go. Использует `net/http`, GORM, PostgreSQL и миграции Goose.
 
 ### Функциональность
 - CRUD для вопросов (`/questions`).
@@ -15,11 +15,9 @@ docker-compose up --build
 ```
 Сервис станет доступен на `http://localhost:8080`.
 
-### Полезные переменные окружения
-| Переменная | Значение по умолчанию | Назначение |
-|------------|----------------------|------------|
-| `HTTP_PORT` | `8080` | Порт HTTP-сервера |
-| `DATABASE_URL` | `postgres://qa_user:qa_password@db:5432/qa_db?sslmode=disable` | Подключение к PostgreSQL |
+### Переменные окружения
+Порт HTTP-сервера - `HTTP_PORT`  `8080`
+Подключение к PostgreSQL - `DATABASE_URL`  `postgres://qa_user:qa_password@db:5432/qa_db?sslmode=disable`
 
 ### Миграции
 Используем [Goose](https://github.com/pressly/goose). Пример запуска локально:
@@ -35,16 +33,18 @@ goose -dir migrations postgres "$DATABASE_URL" up
 go test ./...
 ```
 
-### API (кратко)
-| Метод | Путь | Описание |
-|-------|------|----------|
-| `GET` | `/questions` | список вопросов |
-| `POST` | `/questions` | создать вопрос (`{"text":"..."}`) |
-| `GET` | `/questions/{id}` | вопрос + ответы |
-| `DELETE` | `/questions/{id}` | удалить вопрос и ответы |
-| `POST` | `/questions/{id}/answers` | добавить ответ (`{"user_id":"...","text":"..."}`) |
-| `GET` | `/answers/{id}` | получить ответ |
-| `DELETE` | `/answers/{id}` | удалить ответ |
+### API
+
+### Questions
+- `GET /questions` - список вопросов
+- `POST /questions` - создать вопрос
+- `GET /questions/{id}` - вопрос + ответы
+- `DELETE /questions/{id}` - удалить вопрос и ответы
+
+### Answers
+- `POST /questions/{id}/answers` - добавить ответ
+- `GET /answers/{id}` - получить ответ
+- `DELETE /answers/{id}` - удалить ответ
 
 ### Разработка без Docker
 1. Поднимите PostgreSQL (например, через `docker compose up db`).

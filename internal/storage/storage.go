@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Storage инкапсулирует все операции с БД, чтобы HTTP-слой не знал ничего о GORM.
+// Storage инкапсулирует все операции с БД, чтобы HTTP-слой не знал ничего о GORM
 type Storage struct {
 	db *gorm.DB
 }
@@ -81,5 +81,3 @@ func (s *Storage) QuestionExists(ctx context.Context, id uint) error {
 func IsNotFound(err error) bool {
 	return errors.Is(err, gorm.ErrRecordNotFound)
 }
-
-

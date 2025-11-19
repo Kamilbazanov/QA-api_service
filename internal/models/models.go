@@ -2,7 +2,7 @@ package models
 
 import "time"
 
-// Question описывает вопрос; GORM добавляет ID автоматически, но мы явно укажем поля.
+// структура вопроса
 type Question struct {
 	ID        uint      `json:"id" gorm:"primaryKey"`
 	Text      string    `json:"text" gorm:"type:text;not null"`
@@ -10,7 +10,7 @@ type Question struct {
 	Answers   []Answer  `json:"answers,omitempty" gorm:"constraint:OnDelete:CASCADE"`
 }
 
-// Answer описывает ответ на конкретный вопрос.
+// структура ответа
 type Answer struct {
 	ID         uint      `json:"id" gorm:"primaryKey"`
 	QuestionID uint      `json:"question_id" gorm:"not null;index"`
@@ -18,5 +18,3 @@ type Answer struct {
 	Text       string    `json:"text" gorm:"type:text;not null"`
 	CreatedAt  time.Time `json:"created_at" gorm:"autoCreateTime"`
 }
-
-

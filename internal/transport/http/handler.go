@@ -11,18 +11,17 @@ import (
 	"QA-api_service/internal/storage"
 )
 
-// Handler агрегирует зависимости HTTP-слоя (хранилище и логгер).
 type Handler struct {
 	store  *storage.Storage
 	logger *slog.Logger
 }
 
-// NewHandler инициализирует обработчик.
+// NewHandler инициализирует обработчик
 func NewHandler(store *storage.Storage, logger *slog.Logger) *Handler {
 	return &Handler{store: store, logger: logger}
 }
 
-// RegisterRoutes вешает обработчики на стандартный ServeMux.
+// вешает обработчики на стандартный ServeMux
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/healthz", h.handleHealth)
 	mux.HandleFunc("/questions", h.questionsRouter)
@@ -31,12 +30,12 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/answers", h.answersRouter)
 }
 
-// handleHealth нужен для быстрой проверки статуса контейнера.
+// проверка статуса контейнера
 func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// questionsRouter разбирает URL и перенаправляет на нужную операцию.
+// разбирает урлы
 func (h *Handler) questionsRouter(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/questions")
 	path = strings.Trim(path, "/")
@@ -76,17 +75,14 @@ func (h *Handler) questionsRouter(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// answersRouter обслуживает /answers/{id}.
 func (h *Handler) answersRouter(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/answers")
 	path = strings.Trim(path, "/")
 	if path == "" {
-		// Без ID не понятно, какой ответ нужно обработать.
 		writeError(w, http.StatusMethodNotAllowed, "answer id is required")
 		return
 	}
 
-	// Преобразуем сегмент в число.
 	id, err := strconv.Atoi(path)
 	if err != nil || id <= 0 {
 		writeError(w, http.StatusBadRequest, "invalid answer id")
@@ -96,12 +92,10 @@ func (h *Handler) answersRouter(w http.ResponseWriter, r *http.Request) {
 	h.handleAnswerResource(w, r, uint(id))
 }
 
-// handleQuestionsCollection обслуживает GET/POST /questions.
 func (h *Handler) handleQuestionsCollection(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	switch r.Method {
 	case http.MethodGet:
-		// Получаем все вопросы для списка.
 		questions, err := h.store.ListQuestions(ctx)
 		if err != nil {
 			h.logger.Error("failed to list questions", slog.String("error", err.Error()))
@@ -110,7 +104,6 @@ func (h *Handler) handleQuestionsCollection(w http.ResponseWriter, r *http.Reque
 		}
 		writeJSON(w, http.StatusOK, questions)
 	case http.MethodPost:
-		// Читаем полезную нагрузку с текстом вопроса.
 		var req struct {
 			Text string `json:"text"`
 		}
@@ -118,12 +111,10 @@ func (h *Handler) handleQuestionsCollection(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusBadRequest, "invalid json body")
 			return
 		}
-		// Минимальная валидация.
 		if strings.TrimSpace(req.Text) == "" {
 			writeError(w, http.StatusBadRequest, "text is required")
 			return
 		}
-		// Создаем модель и сохраняем в БД.
 		question := &models.Question{Text: req.Text}
 		if err := h.store.CreateQuestion(ctx, question); err != nil {
 			h.logger.Error("failed to create question", slog.String("error", err.Error()))
@@ -136,12 +127,10 @@ func (h *Handler) handleQuestionsCollection(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-// handleQuestionResource обслуживает GET/DELETE /questions/{id}.
 func (h *Handler) handleQuestionResource(w http.ResponseWriter, r *http.Request, id uint) {
 	ctx := r.Context()
 	switch r.Method {
 	case http.MethodGet:
-		// Загружаем вопрос и его ответы.
 		question, err := h.store.GetQuestionWithAnswers(ctx, id)
 		if err != nil {
 			if storage.IsNotFound(err) {
@@ -154,7 +143,6 @@ func (h *Handler) handleQuestionResource(w http.ResponseWriter, r *http.Request,
 		}
 		writeJSON(w, http.StatusOK, question)
 	case http.MethodDelete:
-		// Удаляем вопрос; каскад удалит ответы.
 		if err := h.store.DeleteQuestion(ctx, id); err != nil {
 			h.logger.Error("failed to delete question", slog.String("error", err.Error()))
 			writeError(w, http.StatusInternalServerError, "failed to delete question")
@@ -166,7 +154,6 @@ func (h *Handler) handleQuestionResource(w http.ResponseWriter, r *http.Request,
 	}
 }
 
-// handleQuestionAnswers обслуживает POST /questions/{id}/answers.
 func (h *Handler) handleQuestionAnswers(w http.ResponseWriter, r *http.Request, id uint) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -175,7 +162,7 @@ func (h *Handler) handleQuestionAnswers(w http.ResponseWriter, r *http.Request, 
 
 	ctx := r.Context()
 
-	// Проверяем, что вопрос существует.
+	// проверяем, что вопрос существует
 	if err := h.store.QuestionExists(ctx, id); err != nil {
 		if storage.IsNotFound(err) {
 			writeError(w, http.StatusNotFound, "question not found")
@@ -191,18 +178,18 @@ func (h *Handler) handleQuestionAnswers(w http.ResponseWriter, r *http.Request, 
 		Text   string `json:"text"`
 	}
 
-	// Считываем тело запроса.
+	// читываем тело запроса
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json body")
 		return
 	}
-	// Проверяем, что пришли оба обязательных поля.
+
 	if strings.TrimSpace(req.UserID) == "" || strings.TrimSpace(req.Text) == "" {
 		writeError(w, http.StatusBadRequest, "user_id and text are required")
 		return
 	}
 
-	// Собираем и сохраняем ответ.
+	//сохраняем ответ
 	answer := &models.Answer{
 		QuestionID: id,
 		UserID:     req.UserID,
@@ -218,12 +205,10 @@ func (h *Handler) handleQuestionAnswers(w http.ResponseWriter, r *http.Request, 
 	writeJSON(w, http.StatusCreated, answer)
 }
 
-// handleAnswerResource обслуживает GET/DELETE /answers/{id}.
 func (h *Handler) handleAnswerResource(w http.ResponseWriter, r *http.Request, id uint) {
 	ctx := r.Context()
 	switch r.Method {
 	case http.MethodGet:
-		// Читаем ответ.
 		answer, err := h.store.GetAnswer(ctx, id)
 		if err != nil {
 			if storage.IsNotFound(err) {
@@ -236,7 +221,7 @@ func (h *Handler) handleAnswerResource(w http.ResponseWriter, r *http.Request, i
 		}
 		writeJSON(w, http.StatusOK, answer)
 	case http.MethodDelete:
-		// Удаляем конкретный ответ.
+		// удаляем конкретный ответ
 		if err := h.store.DeleteAnswer(ctx, id); err != nil {
 			h.logger.Error("failed to delete answer", slog.String("error", err.Error()))
 			writeError(w, http.StatusInternalServerError, "failed to delete answer")
@@ -248,19 +233,18 @@ func (h *Handler) handleAnswerResource(w http.ResponseWriter, r *http.Request, i
 	}
 }
 
-// writeJSON сериализует ответ в JSON с корректными заголовками.
 func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
-// writeError возвращает структуру с сообщением об ошибке.
+// ошибка
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
 
-// filterEmpty убирает пустые сегменты пути (например, двойные слэши).
+// лишние знаки
 func filterEmpty(parts []string) []string {
 	var cleaned []string
 	for _, part := range parts {
@@ -270,5 +254,3 @@ func filterEmpty(parts []string) []string {
 	}
 	return cleaned
 }
-
-

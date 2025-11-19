@@ -15,7 +15,7 @@ type Config struct {
 	DatabaseURL string
 }
 
-// Load собирает конфигурацию с дефолтами для локального запуска (docker-compose).
+// Load собирает конфигурацию с дефолтами для локального запуска- д компоуз
 func Load() Config {
 	return Config{
 		HTTPPort:    getEnv("HTTP_PORT", "8080"),
@@ -35,5 +35,3 @@ func getEnv(key, fallback string) string {
 	}
 	return fallback
 }
-
-

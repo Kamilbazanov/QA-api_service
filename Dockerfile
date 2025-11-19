@@ -1,15 +1,12 @@
 FROM golang:1.21 AS builder
 WORKDIR /app
 
-# Ставим зависимости заранее, чтобы использовать кеш.
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Копируем остальной код и собираем бинарник.
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o qa-api ./cmd/server
 
-# Устанавливаем goose, чтобы потом перенести бинарник в рантайм-слой.
 RUN go install github.com/pressly/goose/v3/cmd/goose@v3.19.4
 
 FROM debian:bookworm-slim AS runtime

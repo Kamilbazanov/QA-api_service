@@ -9,9 +9,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// Connect открывает подключение к PostgreSQL, используя данные из конфигурации.
+// Connect открывает подключение к постгрест
 func Connect(cfg config.Config) (*gorm.DB, error) {
-	// Опционально поддерживаем сборку полного URL (например, для docker-compose).
 	dsn := cfg.DatabaseURL
 	if dsn == "" {
 		dsn = fmt.Sprintf(
@@ -27,5 +26,3 @@ func Connect(cfg config.Config) (*gorm.DB, error) {
 	// Инициализируем GORM с драйвером postgres.
 	return gorm.Open(postgres.Open(dsn), &gorm.Config{})
 }
-
-
