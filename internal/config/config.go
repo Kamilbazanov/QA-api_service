@@ -4,7 +4,6 @@ import (
 	"os"
 )
 
-// Config хранит все параметры приложения, чтобы не дергать переменные окружения по всему коду.
 type Config struct {
 	HTTPPort    string
 	DBHost      string
@@ -15,7 +14,6 @@ type Config struct {
 	DatabaseURL string
 }
 
-// Load собирает конфигурацию с дефолтами для локального запуска- д компоуз
 func Load() Config {
 	return Config{
 		HTTPPort:    getEnv("HTTP_PORT", "8080"),
@@ -28,7 +26,6 @@ func Load() Config {
 	}
 }
 
-// getEnv помогает аккуратно подставить значение по умолчанию, если переменной нет.
 func getEnv(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok && value != "" {
 		return value

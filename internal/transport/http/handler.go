@@ -1,14 +1,14 @@
 package http
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"QA-api_service/internal/models"
 	"QA-api_service/internal/storage"
+
+	"github.com/gin-gonic/gin"
 )
 
 type Handler struct {
@@ -16,241 +16,171 @@ type Handler struct {
 	logger *slog.Logger
 }
 
-// NewHandler инициализирует обработчик
 func NewHandler(store *storage.Storage, logger *slog.Logger) *Handler {
 	return &Handler{store: store, logger: logger}
 }
 
-// вешает обработчики на стандартный ServeMux
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/healthz", h.handleHealth)
-	mux.HandleFunc("/questions", h.questionsRouter)
-	mux.HandleFunc("/questions/", h.questionsRouter)
-	mux.HandleFunc("/answers/", h.answersRouter)
-	mux.HandleFunc("/answers", h.answersRouter)
-}
+func (h *Handler) RegisterRoutes(router *gin.Engine) {
+	router.GET("/healthz", h.handleHealth)
 
-// проверка статуса контейнера
-func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
+	questions := router.Group("/questions")
+	{
+		questions.GET("", h.listQuestions)
+		questions.POST("", h.createQuestion)
+		questions.GET("/:id", h.getQuestion)
+		questions.DELETE("/:id", h.deleteQuestion)
+		questions.POST("/:id/answers", h.createAnswer)
+	}
 
-// разбирает урлы
-func (h *Handler) questionsRouter(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/questions")
-	path = strings.Trim(path, "/")
-
-	switch {
-	case path == "":
-		// Если дополнительных сегментов нет — работаем со списком вопросов.
-		h.handleQuestionsCollection(w, r)
-	default:
-		// Делим путь на сегменты, чтобы узнать ID и вложенный ресурс.
-		segments := filterEmpty(strings.Split(path, "/"))
-		if len(segments) == 0 {
-			h.handleQuestionsCollection(w, r)
-			return
-		}
-
-		// Первый сегмент — это ID вопроса.
-		id, err := strconv.Atoi(segments[0])
-		if err != nil || id <= 0 {
-			writeError(w, http.StatusBadRequest, "invalid question id")
-			return
-		}
-
-		// /questions/{id}
-		if len(segments) == 1 {
-			h.handleQuestionResource(w, r, uint(id))
-			return
-		}
-
-		// /questions/{id}/answers
-		if len(segments) == 2 && segments[1] == "answers" {
-			h.handleQuestionAnswers(w, r, uint(id))
-			return
-		}
-
-		writeError(w, http.StatusNotFound, "route not found")
+	answers := router.Group("/answers")
+	{
+		answers.GET("/:id", h.getAnswer)
+		answers.DELETE("/:id", h.deleteAnswer)
 	}
 }
 
-func (h *Handler) answersRouter(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/answers")
-	path = strings.Trim(path, "/")
-	if path == "" {
-		writeError(w, http.StatusMethodNotAllowed, "answer id is required")
+func (h *Handler) handleHealth(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (h *Handler) listQuestions(c *gin.Context) {
+	questions, err := h.store.ListQuestions(c.Request.Context())
+	if err != nil {
+		h.logger.Error("failed to list questions", slog.String("error", err.Error()))
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to list questions"})
+		return
+	}
+	c.JSON(http.StatusOK, questions)
+}
+
+func (h *Handler) createQuestion(c *gin.Context) {
+	var req CreateQuestionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid json body"})
 		return
 	}
 
-	id, err := strconv.Atoi(path)
-	if err != nil || id <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid answer id")
+	question := &models.Question{Text: req.Text}
+	if err := h.store.CreateQuestion(c.Request.Context(), question); err != nil {
+		h.logger.Error("failed to create question", slog.String("error", err.Error()))
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to create question"})
+		return
+	}
+	c.JSON(http.StatusCreated, question)
+}
+
+func (h *Handler) getQuestion(c *gin.Context) {
+	id, err := h.parseID(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid question id"})
 		return
 	}
 
-	h.handleAnswerResource(w, r, uint(id))
-}
-
-func (h *Handler) handleQuestionsCollection(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	switch r.Method {
-	case http.MethodGet:
-		questions, err := h.store.ListQuestions(ctx)
-		if err != nil {
-			h.logger.Error("failed to list questions", slog.String("error", err.Error()))
-			writeError(w, http.StatusInternalServerError, "failed to list questions")
-			return
-		}
-		writeJSON(w, http.StatusOK, questions)
-	case http.MethodPost:
-		var req struct {
-			Text string `json:"text"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid json body")
-			return
-		}
-		if strings.TrimSpace(req.Text) == "" {
-			writeError(w, http.StatusBadRequest, "text is required")
-			return
-		}
-		question := &models.Question{Text: req.Text}
-		if err := h.store.CreateQuestion(ctx, question); err != nil {
-			h.logger.Error("failed to create question", slog.String("error", err.Error()))
-			writeError(w, http.StatusInternalServerError, "failed to create question")
-			return
-		}
-		writeJSON(w, http.StatusCreated, question)
-	default:
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-	}
-}
-
-func (h *Handler) handleQuestionResource(w http.ResponseWriter, r *http.Request, id uint) {
-	ctx := r.Context()
-	switch r.Method {
-	case http.MethodGet:
-		question, err := h.store.GetQuestionWithAnswers(ctx, id)
-		if err != nil {
-			if storage.IsNotFound(err) {
-				writeError(w, http.StatusNotFound, "question not found")
-				return
-			}
-			h.logger.Error("failed to get question", slog.String("error", err.Error()))
-			writeError(w, http.StatusInternalServerError, "failed to get question")
-			return
-		}
-		writeJSON(w, http.StatusOK, question)
-	case http.MethodDelete:
-		if err := h.store.DeleteQuestion(ctx, id); err != nil {
-			h.logger.Error("failed to delete question", slog.String("error", err.Error()))
-			writeError(w, http.StatusInternalServerError, "failed to delete question")
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	default:
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-	}
-}
-
-func (h *Handler) handleQuestionAnswers(w http.ResponseWriter, r *http.Request, id uint) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-
-	ctx := r.Context()
-
-	// проверяем, что вопрос существует
-	if err := h.store.QuestionExists(ctx, id); err != nil {
+	question, err := h.store.GetQuestionWithAnswers(c.Request.Context(), id)
+	if err != nil {
 		if storage.IsNotFound(err) {
-			writeError(w, http.StatusNotFound, "question not found")
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: "question not found"})
+			return
+		}
+		h.logger.Error("failed to get question", slog.String("error", err.Error()))
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to get question"})
+		return
+	}
+	c.JSON(http.StatusOK, question)
+}
+
+func (h *Handler) deleteQuestion(c *gin.Context) {
+	id, err := h.parseID(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid question id"})
+		return
+	}
+
+	if err := h.store.DeleteQuestion(c.Request.Context(), id); err != nil {
+		h.logger.Error("failed to delete question", slog.String("error", err.Error()))
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to delete question"})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) createAnswer(c *gin.Context) {
+	questionID, err := h.parseID(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid question id"})
+		return
+	}
+
+	if err := h.store.QuestionExists(c.Request.Context(), questionID); err != nil {
+		if storage.IsNotFound(err) {
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: "question not found"})
 			return
 		}
 		h.logger.Error("failed to check question", slog.String("error", err.Error()))
-		writeError(w, http.StatusInternalServerError, "failed to create answer")
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to create answer"})
 		return
 	}
 
-	var req struct {
-		UserID string `json:"user_id"`
-		Text   string `json:"text"`
-	}
-
-	// читываем тело запроса
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json body")
+	var req CreateAnswerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid json body"})
 		return
 	}
 
-	if strings.TrimSpace(req.UserID) == "" || strings.TrimSpace(req.Text) == "" {
-		writeError(w, http.StatusBadRequest, "user_id and text are required")
-		return
-	}
-
-	//сохраняем ответ
 	answer := &models.Answer{
-		QuestionID: id,
+		QuestionID: questionID,
 		UserID:     req.UserID,
 		Text:       req.Text,
 	}
 
-	if err := h.store.CreateAnswer(ctx, answer); err != nil {
+	if err := h.store.CreateAnswer(c.Request.Context(), answer); err != nil {
 		h.logger.Error("failed to create answer", slog.String("error", err.Error()))
-		writeError(w, http.StatusInternalServerError, "failed to create answer")
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to create answer"})
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, answer)
+	c.JSON(http.StatusCreated, answer)
 }
 
-func (h *Handler) handleAnswerResource(w http.ResponseWriter, r *http.Request, id uint) {
-	ctx := r.Context()
-	switch r.Method {
-	case http.MethodGet:
-		answer, err := h.store.GetAnswer(ctx, id)
-		if err != nil {
-			if storage.IsNotFound(err) {
-				writeError(w, http.StatusNotFound, "answer not found")
-				return
-			}
-			h.logger.Error("failed to get answer", slog.String("error", err.Error()))
-			writeError(w, http.StatusInternalServerError, "failed to get answer")
+func (h *Handler) getAnswer(c *gin.Context) {
+	id, err := h.parseID(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid answer id"})
+		return
+	}
+
+	answer, err := h.store.GetAnswer(c.Request.Context(), id)
+	if err != nil {
+		if storage.IsNotFound(err) {
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: "answer not found"})
 			return
 		}
-		writeJSON(w, http.StatusOK, answer)
-	case http.MethodDelete:
-		// удаляем конкретный ответ
-		if err := h.store.DeleteAnswer(ctx, id); err != nil {
-			h.logger.Error("failed to delete answer", slog.String("error", err.Error()))
-			writeError(w, http.StatusInternalServerError, "failed to delete answer")
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	default:
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		h.logger.Error("failed to get answer", slog.String("error", err.Error()))
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to get answer"})
+		return
 	}
+	c.JSON(http.StatusOK, answer)
 }
 
-func writeJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
-}
-
-// ошибка
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
-}
-
-// лишние знаки
-func filterEmpty(parts []string) []string {
-	var cleaned []string
-	for _, part := range parts {
-		if trimmed := strings.TrimSpace(part); trimmed != "" {
-			cleaned = append(cleaned, trimmed)
-		}
+func (h *Handler) deleteAnswer(c *gin.Context) {
+	id, err := h.parseID(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid answer id"})
+		return
 	}
-	return cleaned
+
+	if err := h.store.DeleteAnswer(c.Request.Context(), id); err != nil {
+		h.logger.Error("failed to delete answer", slog.String("error", err.Error()))
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to delete answer"})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) parseID(idStr string) (uint, error) {
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		return 0, err
+	}
+	return uint(id), nil
 }

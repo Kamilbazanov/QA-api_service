@@ -9,7 +9,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// Connect открывает подключение к постгрест
 func Connect(cfg config.Config) (*gorm.DB, error) {
 	dsn := cfg.DatabaseURL
 	if dsn == "" {
@@ -23,6 +22,5 @@ func Connect(cfg config.Config) (*gorm.DB, error) {
 		)
 	}
 
-	// Инициализируем GORM с драйвером postgres.
 	return gorm.Open(postgres.Open(dsn), &gorm.Config{})
 }
